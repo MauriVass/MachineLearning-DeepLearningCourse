@@ -14,8 +14,8 @@ def pil_loader(path):
         return img.convert('RGB')
 
 def make_dataset(directory, file, class_to_idx):
-    instances = []
-
+    instances_train = []
+    instances_val = []
     # Expand the environment variables
     # with their corresponding
     # value in the given paths
@@ -23,6 +23,7 @@ def make_dataset(directory, file, class_to_idx):
 
     root = directory.split('/')[0]
     indexes = open(f'{root}/{ file }.txt','r').readlines()
+    count = 0
     for i in indexes:
         i = i.replace('\n','')
         path = os.path.join(directory, i)
@@ -30,8 +31,14 @@ def make_dataset(directory, file, class_to_idx):
         if(class_name != 'BACKGROUND_Google'):
             class_index = class_to_idx[class_name]
             item = path, class_index
-            instances.append(item)
-    return instances , indexes
+            if(count%3==0):
+                #Validation
+                instances_val.append(item)
+            else:
+                #Train
+                instances_train.append(item)
+            count += 1
+    return instances_train , instances_val
 
 
 class Caltech(VisionDataset):
@@ -51,17 +58,21 @@ class Caltech(VisionDataset):
         '''
 
         classes, class_to_idx = self._find_classes(self.root)
-        samples, self.indexes = make_dataset(self.root, split, class_to_idx)#
-        if len(samples) == 0:
+        samples_train, samples_val = make_dataset(self.root, split, class_to_idx)#
+        if len(samples_train) == 0:
             raise (RuntimeError("Found 0 files in subfolders of: " + self.root + "\n"
                                 "Supported extensions are: " + ",".join(extensions)))
 
         self.classes = classes
         self.class_to_idx = class_to_idx
-        self.samples = samples
-        #Get the class from each element
-        self.targets = [s[1] for s in samples]
+        self.samples_train = samples_train
+        self.samples_val = samples_val
+        self.samples = []#samples_train + samples_val
 
+        #Get the class from each element
+        self.targets_train = [s[1] for s in samples_train]
+        self.targets_val = [s[1] for s in samples_val]
+        self.targets = []#[s[1] for s in self.samples]
     def _find_classes(self, dir):
         """
         Finds the class folders in a dataset.
@@ -128,6 +139,17 @@ class Caltech(VisionDataset):
         length = len(self.samples) # Provide a way to get the length (number of elements) of the dataset
         return length
 
+
+    def SetVal(self):
+        self.samples = self.samples_val
+        self.targets = self.targets_val
+    def SetTrain(self):
+        self.samples = self.samples_train
+        self.targets = self.targets_train
+    def SetTest(self):
+        self.samples = self.samples_train + self.samples_val
+        self.targets = self.targets_train + self.targets_val
+
     def getClass(self):
         return self.classes
     def getClass_to_idx(self):
@@ -138,5 +160,3 @@ class Caltech(VisionDataset):
         return self.samples
     def getRoot(self):
         return self.root
-    def getIndexes(self):
-        return self.indexes
