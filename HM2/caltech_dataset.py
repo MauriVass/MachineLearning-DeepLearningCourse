@@ -31,7 +31,7 @@ def make_dataset(directory, file, class_to_idx):
         if(class_name != 'BACKGROUND_Google'):
             class_index = class_to_idx[class_name]
             item = path, class_index
-            if(count%3==0):
+            if(count%2==0):
                 #Validation
                 instances_val.append(item)
             else:
