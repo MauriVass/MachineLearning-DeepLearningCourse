@@ -140,9 +140,10 @@ class Caltech(VisionDataset):
         return length
 
 
-    def SetVal(self):
+    def SetVal(self,transform):
         self.samples = self.samples_val
         self.targets = self.targets_val
+        self.transform = transform
     def SetTrain(self):
         self.samples = self.samples_train
         self.targets = self.targets_train

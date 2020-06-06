@@ -19,6 +19,8 @@ ctx is a context object that can be
 to stash information for backward computation. You can cache
 objects for use in the backward pass using the ctx.save_for_backward method
 '''
+
+'''
 '''
 class ReverseLayerF(Function):
     # Forwards identity
@@ -34,7 +36,9 @@ class ReverseLayerF(Function):
         output = grad_output.neg() * ctx.alpha
 
         return output, None
-'''
+
+
+
 class AlexNet(nn.Module):
 
     def __init__(self, num_classes=1000):
@@ -75,7 +79,7 @@ class AlexNet(nn.Module):
             nn.Linear(4096, 2)
         )
 
-        self.alpha = nn.Parameter(torch.tensor(0.1))
+        self.alpha = nn.Parameter(torch.tensor(0.01))
 
     def forward(self, x, isAlpha=None):
         x = self.features(x)
@@ -85,10 +89,11 @@ class AlexNet(nn.Module):
         # If we pass alpha, we can assume we are training the discriminator
         if isAlpha is not None:
             # gradient reversal layer (backward gradients will be reversed)
-            #reverse_feature = ReverseLayerF.apply(x, self.alpha)
-            v =  x.neg() * self.alpha
-            #discriminator_output = self.domain_classifier(reverse_feature)
-            discriminator_output = self.domain_classifier(v)
+            reverse_feature = ReverseLayerF.apply(x, self.alpha)
+            discriminator_output = self.domain_classifier(reverse_feature)
+
+            #v =  x.neg() * self.alpha
+            #discriminator_output = self.domain_classifier(v)
             return discriminator_output
         # If we don't pass alpha, we assume we are training with supervision
         else:
@@ -96,6 +101,9 @@ class AlexNet(nn.Module):
             class_output = self.classifier(x)
             return class_output
 
+
+    def setAlpha(self, alpha):
+        self.alpha = alpha
 
 
 def alexnet(pretrained=False, progress=True, **kwargs):

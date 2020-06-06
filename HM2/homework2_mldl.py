@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from copy import deepcopy
 import seaborn as sns
+import cv2
 
 """**Set Arguments**"""
 
@@ -101,7 +102,7 @@ def PrepareDataset():
   train_dataset.SetTrain()
 
   val_dataset = train_dataset_Caltech
-  val_dataset.SetVal()
+  val_dataset.SetVal(eval_transform)
 
   test_dataset = Caltech(DATA_DIR, split='test', transform=eval_transform)
   test_dataset.SetTest()
@@ -342,7 +343,7 @@ if(False):
   print()
   best_net_scratch = torch.load(PATH_MODELS+meta+'.pth')
   print('Best accuracy on Validation set {}'.format(best_acc))
-  _ = Validation(best_net_scratch, val_dataloader)
+  _ = Validation(best_net_scratch, test_dataloader)
 
 def PlotAccuracyLoss(train, valid, meta=''):
   acc_train = np.array(train)[:,0]
@@ -388,36 +389,6 @@ def PlotAccuracyLoss(train, valid, meta=''):
 if(False):
   meta = 'Training from Scratch: LR= {} and Optimazer= SGD'.format(LR)
   PlotAccuracyLoss(test,valid, meta)
-
-"""**Test**"""
-
-if(False):
-  #Old version
-  '''
-  net = net.to(DEVICE) # this will bring the network to GPU if DEVICE is cuda
-  net.train(False) # Set Network to evaluation mode
-
-  running_corrects = 0
-  for images, labels in tqdm(test_dataloader):
-    images = images.to(DEVICE)
-    labels = labels.to(DEVICE)
-
-    # Forward Pass
-    outputs = net(images)
-
-    # Get predictions
-    _, preds = torch.max(outputs.data, 1)
-
-    # Update Corrects
-    running_corrects += torch.sum(preds == labels.data).data.item()
-
-  # Calculate Accuracy
-  accuracy = running_corrects / float(len(test_dataset))
-
-  print('Test Accuracy: {}'.format(accuracy))
-  '''
-  #New version:
-  result = Validation(best_net_scratch,test_dataloader)
 
 """Training using different parameters"""
 
@@ -519,16 +490,16 @@ def SketchHeatMap(scores,trainAcc=False):
   plt.show()
 
 if(False):
-  SketchHeatMap(scores_scratch)
   SketchHeatMap(scores_scratch,True)
+  SketchHeatMap(scores_scratch)
 
 if(False):
   lr_best = 0.001
   op_best = 'Adam'
-  meta_t = str(lr_best)+'_'+op_best
+  meta_t = 'scratch_'+str(lr_best)+'_'+op_best
   best_net_scratch = torch.load(PATH_MODELS+meta_t+'.pth')
   print('Best accuracy on Validation set {}'.format(scores_scratch[lr_best,op_best][2]))
-  _ = Validation(best_net_scratch, val_dataloader)
+  _ = Validation(best_net_scratch, test_dataloader)
 
 """Pre-Trainined net"""
 
@@ -547,6 +518,7 @@ eval_transform = transforms.Compose([transforms.Resize(256),
 ])
 
 train_dataset, val_dataset, test_dataset = PrepareDataset()
+train_dataloader, val_dataloader, test_dataloader = PrepareDataLoaders()
 
 if(False):
 
@@ -673,6 +645,110 @@ if(False):
 
 """Augmented Dataset"""
 
+def TrainingAug(net, meta =''):
+  showImage=True
+  # By default, everything is loaded to cpu
+  model = net.to(DEVICE) # this will bring the network to GPU if DEVICE is cuda
+
+  cudnn.benchmark # Calling this optimizes runtime
+
+  current_step = 0
+  current_epoch = 0
+  loss_value = 0
+  # Start iterating over the epochs
+
+  #Test and Validation Loss and Accuracy
+  train = []
+  valid = []
+  best_acc = -9999
+  for epoch in range(NUM_EPOCHS):
+    print('Starting epoch {}/{}, LR = {}'.format(epoch+1, NUM_EPOCHS, scheduler.get_lr()))
+
+    running_corrects = 0
+    # Iterate over the dataset
+    for images, labels in train_dataloader:
+      #net.train(True)
+      # Bring data over the device of choice
+      images = images.to(DEVICE)
+      labels = labels.to(DEVICE)
+
+      if(showImage):
+        invTrans = transforms.Compose([ transforms.Normalize(mean = [ 0., 0., 0. ],
+                                                     std = [ 1/0.229, 1/0.224, 1/0.225 ]),
+                                transforms.Normalize(mean = [ -0.485, -0.456, -0.406 ],
+                                                     std = [ 1., 1., 1. ]),
+                               ])
+
+        inv_tensor_0 = invTrans(images[0])
+        plt.imshow(np.transpose(inv_tensor_0.cpu().detach().numpy(), (1, 2, 0)))
+        plt.show()
+        inv_tensor_5 = invTrans(images[5])
+        plt.imshow(np.transpose(inv_tensor_5.cpu().detach().numpy(), (1, 2, 0)))
+        plt.show()
+        inv_tensor_10 = invTrans(images[10])
+        plt.imshow(np.transpose(inv_tensor_10.cpu().detach().numpy(), (1, 2, 0)))
+        plt.show()
+        inv_tensor_15 = invTrans(images[15])
+        plt.imshow(np.transpose(inv_tensor_15.cpu().detach().numpy(), (1, 2, 0)))
+        plt.show()
+        showImage = False
+
+      net.train() # Sets module in training mode
+
+      # PyTorch, by default, accumulates gradients after each backward pass
+      # We need to manually set the gradients to zero before starting a new iteration
+      optimizer.zero_grad() # Zero-ing the gradients
+
+      # Forward pass to the network
+      outputs = net(images)
+
+      # Compute loss based on output and ground truth
+      loss = criterion(outputs, labels)
+      max = 6
+      loss_value = loss.item() if loss.item()<max else max
+
+      # Get predictions
+      _, preds = torch.max(outputs.data, 1)
+      
+      # Update Corrects
+      running_corrects += torch.sum(preds == labels.data).data.item()
+
+      # Log loss
+      if current_step % LOG_FREQUENCY == 0:
+        print('Step {}, Loss {}'.format( current_step, loss_value ))
+
+      # Compute gradients for each layer and update weights
+      loss.backward()  # backward pass: computes gradients
+      optimizer.step() # update weights based on accumulated gradients
+
+      current_step += 1
+
+    # Calculate Accuracy
+    accuracy = running_corrects / float(len(train_dataset))
+
+    #Store training values each epoch
+    train.append( (accuracy, loss_value) )
+
+    
+    #Evaluate the model each epoch and store the values
+    acc_val = 0
+    loss_val = 0
+    if current_epoch % VAL_FREQUENCY == 0:
+      acc_val, loss_val = Validation(net,val_dataloader)
+      valid.append( (acc_val , loss_val) )
+
+      #Get model with best accuracy
+      if(best_acc < acc_val):
+        best_acc = acc_val
+        torch.save(net, PATH_MODELS+meta+'.pth')
+
+    current_epoch += 1
+
+    # Step the scheduler
+    scheduler.step()
+
+  return train, valid, best_acc
+
 if(False):
   '''in any epoch the dataloader will apply a fresh set of random operations “on the fly”.
   So instead of showing the exact same items at every epoch,
@@ -680,16 +756,35 @@ if(False):
   So after three epochs, you would have seen three random variants of each item in a dataset.'''
 
   # Define transforms for training phase
-  angle = 180
-  p = 0.85
-  transformations = [transforms.RandomHorizontalFlip(p=p), transforms.RandomRotation([-angle,angle]), transforms.RandomVerticalFlip(p=1-p), transforms.ColorJitter(brightness=0, contrast=0, saturation=0, hue=0)]
-  train_transform = transforms.Compose([transforms.RandomChoice(transformations),
+  train_transformations = []
+  train_transform_1 = transforms.Compose([transforms.RandomHorizontalFlip(1),
                                         transforms.Resize(256),      
                                         transforms.CenterCrop(224),                         
                                                                     
                                         transforms.ToTensor(),
                                         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
   ])
+  train_transformations.append( ('Horizontal Flip',train_transform_1) )
+
+  angle = 90
+  train_transform_2 = transforms.Compose([transforms.RandomRotation([-angle,angle]),
+                                        transforms.Resize(256),      
+                                        transforms.CenterCrop(224),                         
+                                                                    
+                                        transforms.ToTensor(),
+                                        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+  ])
+  train_transformations.append( ('Rotation',train_transform_2) )
+
+  train_transform_3 = transforms.Compose([transforms.RandomVerticalFlip(1),
+                                        transforms.Resize(256),      
+                                        transforms.CenterCrop(224),                         
+                                                                    
+                                        transforms.ToTensor(),
+                                        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+  ])
+  train_transformations.append( ('Vertical Flip',train_transform_3) )
+
   # Define transforms for the evaluation phase
   eval_transform = transforms.Compose([transforms.Resize(256),
                                         transforms.CenterCrop(224),
@@ -697,32 +792,38 @@ if(False):
                                         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))                                    
   ])
 
-  PrepareDataset()
+  for t in range(len(train_transformations)):
+    print('Augmentation with transformation: {}'.format(train_transformations[t][0]))
 
-  net = alexnet(pretrained=True) # Loading AlexNet model
+    train_transform = train_transformations[t][1]
+    train_dataset, val_dataset, test_dataset = PrepareDataset()
+    train_dataloader, val_dataloader, test_dataloader = PrepareDataLoaders()
 
-  net.classifier[6] = nn.Linear(4096, NUM_CLASSES) 
+    net = alexnet(pretrained=True) # Loading AlexNet model
 
-  #net = FreezeNetwork(net,0)
+    net.classifier[6] = nn.Linear(4096, NUM_CLASSES) 
 
-  criterion = nn.CrossEntropyLoss()
+    #net = FreezeNetwork(net,0)
 
-  parameters_to_optimize = net.parameters()
-  optimizer = optim.RMSprop(parameters_to_optimize, lr=best_lr, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
-  scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA)
+    criterion = nn.CrossEntropyLoss()
 
-  print()
-  meta = 'augm'+str(best_lr)+'_'+best_opti
-  test, valid, best_acc = Training(net,meta_t)
+    parameters_to_optimize = net.parameters()
+    optimizer = optim.RMSprop(parameters_to_optimize, lr=best_lr, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA)
 
-  print()
-  meta = 'Augmentation wirh LR = {} and Optimizer = {}'.format(best_lr, best_opti)
-  PlotAccuracyLoss(test,valid,meta=meta)
+    print()
+    meta_t = 'augm'+str(t)
+    test, valid, best_acc = TrainingAug(net,meta_t)
 
-  print()
-  best_net = torch.load(PATH_MODELS+meta_t+'.pth')
-  print('Best accuracy on Validation set {}'.format(best_acc))
-  _ = Validation(best_net, test_dataloader)
+    print()
+    meta = 'Augmentation with Transformation: {}'.format(train_transformations[t][0])
+    PlotAccuracyLoss(test,valid,meta=meta)
+
+    print()
+    best_net = torch.load(PATH_MODELS+meta_t+'.pth')
+    print('Best accuracy on Validation set {}'.format(best_acc))
+    _ = Validation(best_net, test_dataloader)
+    print()
 
 """Beyond AlexNet"""
 
@@ -813,6 +914,7 @@ net = FreezeNetwork(net,-1)
 criterion = nn.CrossEntropyLoss()
 
 BATCH_SIZE = 256
+LR = 0.001
 
 #Depending on which GPU Google Colab assign, you may need to reduce the batch size (factor of 2 is enough)
 '''
