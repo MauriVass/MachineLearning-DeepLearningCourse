@@ -41,7 +41,7 @@ class ReverseLayerF(Function):
 
 class AlexNet(nn.Module):
 
-    def __init__(self, num_classes=1000):
+    def __init__(self, num_classes=1000, alpha=0.01):
         super(AlexNet, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
@@ -79,7 +79,7 @@ class AlexNet(nn.Module):
             nn.Linear(4096, 2)
         )
 
-        self.alpha = nn.Parameter(torch.tensor(0.01))
+        self.alpha = nn.Parameter(torch.tensor(alpha))
 
     def forward(self, x, isAlpha=None):
         x = self.features(x)
@@ -103,7 +103,7 @@ class AlexNet(nn.Module):
 
 
     def setAlpha(self, alpha):
-        self.alpha = alpha
+        self.alpha = nn.Parameter(torch.tensor(alpha))
 
 
 def alexnet(pretrained=False, progress=True, **kwargs):
